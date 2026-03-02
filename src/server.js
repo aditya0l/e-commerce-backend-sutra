@@ -11,7 +11,11 @@ const functions = require('firebase-functions/v2');
 exports.api = functions.https.onRequest(
   {
     region: 'us-central1', // Set the region
-    secrets: [], // Define any Google Cloud Secret Manager secrets here if needed later
+    secrets: [
+      "DATABASE_URL",
+      "JWT_ACCESS_SECRET",
+      "JWT_REFRESH_SECRET"
+    ], // Define any Google Cloud Secret Manager secrets here if needed later
     timeoutSeconds: 60, // Cold starts + DB connection pooling may require a longer timeout
   },
   app
