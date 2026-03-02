@@ -1,0 +1,306 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  USER
+  ADMIN
+  SUPPORT
+}
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  PAID
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  PAYMENT_FAILED
+  REFUNDED
+}
+
+enum PaymentProvider {
+  STRIPE
+  RAZORPAY
+  BANK_TRANSFER
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+// ─── IDENTITY & ACCESS ────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(uuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  role         Role     @default(USER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  refreshTokens RefreshToken[]
+  orders        Order[]
+  cartItems     CartItem[]
+  addresses     Address[]
+  reviews       Review[]
+
+  @@index([email])
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String
+  tokenHash String
+  isRevoked Boolean  @default(false)
+  createdAt DateTime @default(now())
+  expiresAt DateTime @default(dbgenerated("now() + interval '7 days'"))
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ─── CATALOG ─────────────────────────────────────────────────────────────────
+
+model Category {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  // Bilingual: { "fr": "Huiles Ayurvédiques", "en": "Ayurvedic Oils" }
+  name        Json
+  description Json
+  image       String?
+  createdAt   DateTime @default(now())
+
+  products Product[]
+
+  @@index([slug])
+}
+
+model Product {
+  id          String   @id @default(uuid())
+  slug        String   @unique
+  categoryId  String
+  isActive    Boolean  @default(true)
+  sku         String   @unique
+  price       Decimal  @db.Decimal(10, 2)
+  compareAtPrice Decimal? @db.Decimal(10, 2)
+  currency    String   @default("EUR")
+  images      String[] // S3 URLs
+  rating      Decimal  @db.Decimal(3, 2) @default(0)
+  reviewCount Int      @default(0)
+  isNew       Boolean  @default(false)
+  isBestseller Boolean @default(false)
+
+  // ── Bilingual JSONB fields ────────────────────────────────────────────────
+  // Shape: { "fr": "...", "en": "..." }
+  name             Json
+  description      Json
+  shortDescription Json
+  usage            Json
+
+  // ── Complex JSONB arrays ──────────────────────────────────────────────────
+  // benefits:    [{ icon, title: {fr,en}, description: {fr,en} }]
+  benefits    Json @default("[]")
+  // ingredients: [{ name: {fr,en}, description: {fr,en}, image? }]
+  ingredients Json @default("[]")
+  // faq:         [{ question: {fr,en}, answer: {fr,en} }]
+  faq         Json @default("[]")
+
+  // ── Simple arrays ─────────────────────────────────────────────────────────
+  certifications String[]
+  tags           String[]
+
+  // SEO fields
+  metaTitle       Json?   // { fr, en }
+  metaDescription Json?   // { fr, en }
+  canonicalUrl    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  category   Category    @relation(fields: [categoryId], references: [id])
+  inventory  Inventory?
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+  reviews    Review[]
+
+  @@index([slug])
+  @@index([categoryId])
+  @@index([isActive])
+}
+
+// ─── INVENTORY ────────────────────────────────────────────────────────────────
+
+model Inventory {
+  id               String   @id @default(uuid())
+  productId        String   @unique
+  stockQuantity    Int      @default(0)
+  reservedQuantity Int      @default(0)
+  updatedAt        DateTime @updatedAt
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+// ─── REVIEWS ─────────────────────────────────────────────────────────────────
+
+model Review {
+  id        String   @id @default(uuid())
+  productId String
+  userId    String?
+  userName  String
+  userAvatar String?
+  rating    Int
+  // comment: { "fr": "...", "en": "..." }
+  comment   Json
+  verified  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([productId])
+}
+
+// ─── CUSTOMER ─────────────────────────────────────────────────────────────────
+
+model Address {
+  id         String  @id @default(uuid())
+  userId     String
+  firstName  String
+  lastName   String
+  address    String
+  city       String
+  state      String
+  zipCode    String
+  country    String  @default("FR")
+  phone      String
+  isDefault  Boolean @default(false)
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@index([userId])
+}
+
+// ─── CART ─────────────────────────────────────────────────────────────────────
+// Note: Sutra Vedic frontend uses localStorage cart — this is a server-side
+// fallback for logged-in users syncing their cart across devices.
+
+model CartItem {
+  id        String   @id @default(uuid())
+  userId    String
+  productId String
+  quantity  Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+  @@index([userId])
+}
+
+// ─── ORDERS ──────────────────────────────────────────────────────────────────
+
+model Order {
+  id                    String      @id @default(uuid())
+  userId                String?     // nullable — guest checkout
+  shippingAddressId     String?
+  totalAmount           Decimal     @db.Decimal(10, 2)
+  subtotal              Decimal     @db.Decimal(10, 2)
+  tax                   Decimal     @db.Decimal(10, 2)
+  shipping              Decimal     @db.Decimal(10, 2) @default(0)
+  currency              String      @default("EUR")
+  status                OrderStatus @default(PENDING_PAYMENT)
+  paymentProvider       PaymentProvider @default(BANK_TRANSFER)
+  paymentMethod         String      @default("bank_transfer")
+  idempotencyKey        String      @unique
+  stripePaymentIntentId String?
+  trackingNumber        String?
+  courierName           String?
+  adminNote             String?     // admin cancellation reason
+  guestEmail            String?     // for guest checkout
+  guestName             String?
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+
+  user            User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  shippingAddress Address?  @relation(fields: [shippingAddressId], references: [id])
+  items           OrderItem[]
+  payment         Payment?
+
+  @@index([userId])
+  @@index([status])
+}
+
+model OrderItem {
+  id        String  @id @default(uuid())
+  orderId   String
+  productId String
+  quantity  Int
+  unitPrice Decimal @db.Decimal(10, 2)
+  // Snapshot of product name at time of order (bilingual)
+  productSnapshot Json
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+}
+
+// ─── PAYMENTS ────────────────────────────────────────────────────────────────
+
+model Payment {
+  id         String          @id @default(uuid())
+  orderId    String          @unique
+  provider   PaymentProvider
+  providerId String          @unique
+  amount     Decimal         @db.Decimal(10, 2)
+  currency   String          @default("EUR")
+  status     PaymentStatus   @default(PENDING)
+  metadata   Json?
+  createdAt  DateTime        @default(now())
+
+  order Order @relation(fields: [orderId], references: [id])
+
+  @@index([providerId])
+}
+
+// Idempotency table — prevents double-processing webhooks
+model ProcessedWebhook {
+  id          String          @id @default(uuid())
+  eventId     String          @unique
+  provider    PaymentProvider
+  processedAt DateTime        @default(now())
+
+  @@index([eventId])
+}
+
+// ─── BANK INFO (admin-managed, single row) ───────────────────────────────────
+
+model BankInfo {
+  id             String   @id @default("singleton")
+  accountHolder  String   @default("")
+  bankName       String   @default("")
+  iban           String   @default("")
+  bic            String   @default("")
+  instructions   String   @default("")
+  updatedAt      DateTime @updatedAt
+}
