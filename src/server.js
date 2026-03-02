@@ -2,13 +2,22 @@ require('dotenv').config();
 const app = require('./app');
 const logger = require('./config/logger');
 
-const PORT = process.env.PORT || 4000;
+require('dotenv').config();
+const app = require('./app');
+const logger = require('./config/logger');
+const functions = require('firebase-functions/v2');
 
-app.listen(PORT, () => {
-  logger.info(`🚀 Server running on port ${PORT} [${process.env.NODE_ENV}]`);
-});
+// Expose the Express app as a Firebase Cloud Function HTTP Trigger
+exports.api = functions.https.onRequest(
+  {
+    region: 'us-central1', // Set the region
+    secrets: [], // Define any Google Cloud Secret Manager secrets here if needed later
+    timeoutSeconds: 60, // Cold starts + DB connection pooling may require a longer timeout
+  },
+  app
+);
 
-// Graceful shutdown
+// Graceful shutdown (Primarily for local emulation)
 process.on('SIGTERM', () => {
   logger.info('SIGTERM received. Shutting down gracefully...');
   process.exit(0);
